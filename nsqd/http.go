@@ -60,6 +60,7 @@ func newHTTPServer(ctx *context, tlsEnabled bool, tlsRequired bool) *httpServer 
 	router.Handle("POST", "/pub", http_api.Decorate(s.doPUB, http_api.V1))
 	router.Handle("POST", "/mpub", http_api.Decorate(s.doMPUB, http_api.V1))
 	router.Handle("GET", "/stats", http_api.Decorate(s.doStats, log, http_api.V1))
+	router.Handle("GET", "/topic/history", http_api.Decorate(s.doHistory, log, http_api.V1))
 
 	// only v1
 	router.Handle("POST", "/topic/create", http_api.Decorate(s.doCreateTopic, log, http_api.V1))
@@ -342,6 +343,43 @@ func (s *httpServer) doEmptyTopic(w http.ResponseWriter, req *http.Request, ps h
 	}
 
 	return nil, nil
+}
+
+func (s *httpServer) doHistory(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
+	reqParams, err := http_api.NewReqParams(req)
+	if err != nil {
+		s.ctx.nsqd.logf(LOG_ERROR, "failed to parse request params - %s", err)
+		return nil, http_api.Err{400, "INVALID_REQUEST"}
+	}
+
+	topicName, err := reqParams.Get("topic")
+	channelName, err := reqParams.Get("channel")
+	fmt.Println(topicName)
+
+	if !protocol.IsValidTopicName(topicName) {
+		return nil, http_api.Err{400, "INVALID_TOPIC"}
+	}
+	meta, err := ioutil.ReadFile(fmt.Sprintf("../msgs/b/%s:%s.diskqueue.meta.dat", topicName, channelName))
+	if err != nil {
+		return "", err
+	}
+
+	allmsg, err := os.Open(fmt.Sprintf("../msgs/b/%s:%s.diskqueue.000000.dat", topicName, channelName))
+	if err != nil {
+		return "", err
+	}
+
+	// msgs, _ := bufio.NewReader(allmsg).ReadString('\n')
+	stats, _ := allmsg.Stat()
+	buf := make([]byte, stats.Size())
+	bufio.NewReader(allmsg).Read(buf)
+	fmt.Println(buf)
+	// res := map[string]interface{}{
+	// "status": "success",
+	// "meta":   string(meta),
+	// "msgs":   buf,
+	// }
+	return meta, nil
 }
 
 func (s *httpServer) doDeleteTopic(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
