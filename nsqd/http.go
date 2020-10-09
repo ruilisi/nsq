@@ -3,6 +3,7 @@ package nsqd
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,6 +24,13 @@ import (
 	"github.com/nsqio/nsq/internal/protocol"
 	"github.com/nsqio/nsq/internal/version"
 )
+
+type msg struct {
+	Content    string
+	Timestamp  int64
+	FormatTime string
+	MsgID      string
+}
 
 var boolParams = map[string]bool{
 	"true":  true,
@@ -352,6 +360,7 @@ func (s *httpServer) doHistory(w http.ResponseWriter, req *http.Request, ps http
 		return nil, http_api.Err{400, "INVALID_REQUEST"}
 	}
 
+	filename, err := reqParams.Get("filename")
 	topicName, err := reqParams.Get("topic")
 	channelName, err := reqParams.Get("channel")
 	fmt.Println(topicName)
@@ -359,27 +368,41 @@ func (s *httpServer) doHistory(w http.ResponseWriter, req *http.Request, ps http
 	if !protocol.IsValidTopicName(topicName) {
 		return nil, http_api.Err{400, "INVALID_TOPIC"}
 	}
-	meta, err := ioutil.ReadFile(fmt.Sprintf("../msgs/b/%s:%s.diskqueue.meta.dat", topicName, channelName))
+	meta, err := ioutil.ReadFile(fmt.Sprintf("../msgs/%s/%s:%s.diskqueue.meta.dat", filename, topicName, channelName))
 	if err != nil {
 		return "", err
 	}
 
-	allmsg, err := os.Open(fmt.Sprintf("../msgs/b/%s:%s.diskqueue.000000.dat", topicName, channelName))
+	allmsg, err := os.Open(fmt.Sprintf("../msgs/%s/%s:%s.diskqueue.000000.dat", filename, topicName, channelName))
 	if err != nil {
 		return "", err
 	}
 
-	// msgs, _ := bufio.NewReader(allmsg).ReadString('\n')
 	stats, _ := allmsg.Stat()
 	buf := make([]byte, stats.Size())
 	bufio.NewReader(allmsg).Read(buf)
-	fmt.Println(buf)
-	// res := map[string]interface{}{
-	// "status": "success",
-	// "meta":   string(meta),
-	// "msgs":   buf,
-	// }
-	return meta, nil
+
+	res := bytes.Split(buf, []byte("\n\n"))
+
+	msgs := map[int]msg{}
+	for i, bytes := range res {
+		if len(bytes) < 18 {
+			continue
+		}
+		timest := int64(binary.BigEndian.Uint64(bytes[4:12]))
+		m := msgs[i]
+		m.Content = string(bytes[30:])
+		m.FormatTime = time.Unix(timest/1000000000, 0).Format("2006-01-02 15:04:05")
+		m.Timestamp = timest
+		m.MsgID = string(bytes[14:30])
+		msgs[i] = m
+	}
+	resp := map[string]interface{}{
+		"status": "success",
+		"meta":   string(meta),
+		"msgs":   msgs,
+	}
+	return resp, nil
 }
 
 func (s *httpServer) doDeleteTopic(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {

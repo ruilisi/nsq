@@ -62,6 +62,7 @@ func (m *Message) WriteTo(w io.Writer) (int64, error) {
 		return total, err
 	}
 
+	w.Write([]byte("\n"))
 	return total, nil
 }
 
